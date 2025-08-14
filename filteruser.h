@@ -1,16 +1,17 @@
 //
 //    Copyright (C) Microsoft.  All rights reserved.
+//    (Augmented for ThreatLockerNetworkSniffer)
 //
 #ifndef __FILTERUSER_H__
 #define __FILTERUSER_H__
 
-//
-// Temp file to test filter
-//
+#include <devioctl.h>
 
+// Keep sample IOCTL macro
 #define _NDIS_CONTROL_CODE(request,method) \
             CTL_CODE(FILE_DEVICE_PHYSICAL_NETCARD, request, method, FILE_ANY_ACCESS)
 
+// --- Sample's existing IOCTLs (kept for compatibility) ---
 #define IOCTL_FILTER_RESTART_ALL            _NDIS_CONTROL_CODE(0, METHOD_BUFFERED)
 #define IOCTL_FILTER_RESTART_ONE_INSTANCE   _NDIS_CONTROL_CODE(1, METHOD_BUFFERED)
 #define IOCTL_FILTER_ENUERATE_ALL_INSTANCES _NDIS_CONTROL_CODE(2, METHOD_BUFFERED)
@@ -27,64 +28,35 @@
 #define IOCTL_FILTER_READ_INSTANCE_CONFIG   _NDIS_CONTROL_CODE(12, METHOD_BUFFERED)
 #define IOCTL_FILTER_WRITE_INSTANCE_CONFIG  _NDIS_CONTROL_CODE(13, METHOD_BUFFERED)
 
+// --- ThreatLocker additions ---
+#define IOCTL_TL_SET_WHITELIST  _NDIS_CONTROL_CODE(100, METHOD_BUFFERED)
+#define IOCTL_TL_GET_DECISIONS  _NDIS_CONTROL_CODE(101, METHOD_BUFFERED)
 
-#define MAX_FILTER_INSTANCE_NAME_LENGTH     256
-#define MAX_FILTER_CONFIG_KEYWORD_LENGTH    256
-typedef struct _FILTER_DRIVER_ALL_STAT
-{
-    ULONG          AttachCount;
-    ULONG          DetachCount;
-    ULONG          ExternalRequestFailedCount;
-    ULONG          ExternalRequestSuccessCount;
-    ULONG          InternalRequestFailedCount;
-} FILTER_DRIVER_ALL_STAT, * PFILTER_DRIVER_ALL_STAT;
+#pragma pack(push, 1)
+typedef struct _TL_ENTRY_V4 {
+    ULONG  DstIpV4;   // network byte order
+    USHORT DstPort;   // network byte order
+    UCHAR  Proto;     // 0=any, 6=TCP, 17=UDP
+    UCHAR  Reserved;
+} TL_ENTRY_V4;
 
+typedef struct _TL_SET_WHITELIST {
+    ULONG Count;      // number of TL_ENTRY_V4 immediately following
+    // TL_ENTRY_V4 Items[Count];
+} TL_SET_WHITELIST;
 
-typedef struct _FILTER_SET_OID
-{
-    WCHAR           InstanceName[MAX_FILTER_INSTANCE_NAME_LENGTH];
-    ULONG           InstanceNameLength;
-    NDIS_OID        Oid;
-    NDIS_STATUS     Status;
-    UCHAR           Data[sizeof(ULONG)];
+typedef struct _TL_DECISION_V4 {
+    ULONG  DstIpV4;   // network byte order (for printing user-mode can ntohl)
+    USHORT DstPort;   // host order (for convenience)
+    UCHAR  Proto;     // 6/17/other
+    UCHAR  Allow;     // 1=whitelisted, 0=not
+} TL_DECISION_V4;
 
-}FILTER_SET_OID, *PFILTER_SET_OID;
-
-typedef struct _FILTER_QUERY_OID
-{
-    WCHAR           InstanceName[MAX_FILTER_INSTANCE_NAME_LENGTH];
-    ULONG           InstanceNameLength;
-    NDIS_OID        Oid;
-    NDIS_STATUS     Status;
-    UCHAR           Data[sizeof(ULONG)];
-
-}FILTER_QUERY_OID, *PFILTER_QUERY_OID;
-
-typedef struct _FILTER_READ_CONFIG
-{
-    _Field_size_bytes_part_(MAX_FILTER_INSTANCE_NAME_LENGTH,InstanceNameLength)
-    WCHAR                   InstanceName[MAX_FILTER_INSTANCE_NAME_LENGTH];
-    ULONG                   InstanceNameLength;
-    _Field_size_bytes_part_(MAX_FILTER_CONFIG_KEYWORD_LENGTH,KeywordLength)
-    WCHAR                   Keyword[MAX_FILTER_CONFIG_KEYWORD_LENGTH];
-    ULONG                   KeywordLength;
-    NDIS_PARAMETER_TYPE     ParameterType;
-    NDIS_STATUS             Status;
-    UCHAR                   Data[sizeof(ULONG)];
-}FILTER_READ_CONFIG, *PFILTER_READ_CONFIG;
-
-typedef struct _FILTER_WRITE_CONFIG
-{
-    _Field_size_bytes_part_(MAX_FILTER_INSTANCE_NAME_LENGTH,InstanceNameLength)
-    WCHAR                   InstanceName[MAX_FILTER_INSTANCE_NAME_LENGTH];
-    ULONG                   InstanceNameLength;
-    _Field_size_bytes_part_(MAX_FILTER_CONFIG_KEYWORD_LENGTH,KeywordLength)
-    WCHAR                   Keyword[MAX_FILTER_CONFIG_KEYWORD_LENGTH];
-    ULONG                   KeywordLength;
-    NDIS_PARAMETER_TYPE     ParameterType;
-    NDIS_STATUS             Status;
-    UCHAR                   Data[sizeof(ULONG)];
-}FILTER_WRITE_CONFIG, *PFILTER_WRITE_CONFIG;
+typedef struct _TL_GET_DECISIONS {
+    ULONG MaxItems;   // IN: capacity of Items[]
+    ULONG OutCount;   // OUT: actual number returned
+    // TL_DECISION_V4 Items[OutCount];
+} TL_GET_DECISIONS;
+#pragma pack(pop)
 
 #endif //__FILTERUSER_H__
-

@@ -1,289 +1,113 @@
 /*++
- *
- * The file contains the routines to create a device and handle ioctls
- *
--- */
-
+ * Minimal device and IOCTL handlers for ThreatLockerNetworkSniffer
+--*/
 #include "precomp.h"
-
 
 #pragma NDIS_INIT_FUNCTION(FilterRegisterDevice)
 
-
 _IRQL_requires_max_(PASSIVE_LEVEL)
-NDIS_STATUS
-FilterRegisterDevice(
-    VOID
-    )
+NDIS_STATUS FilterRegisterDevice(VOID)
 {
-    NDIS_STATUS            Status = NDIS_STATUS_SUCCESS;
-    UNICODE_STRING         DeviceName;
-    UNICODE_STRING         DeviceLinkUnicodeString;
-    PDRIVER_DISPATCH       DispatchTable[IRP_MJ_MAXIMUM_FUNCTION+1];
-    NDIS_DEVICE_OBJECT_ATTRIBUTES   DeviceAttribute;
-    PFILTER_DEVICE_EXTENSION        FilterDeviceExtension;
+    NDIS_STATUS Status = NDIS_STATUS_SUCCESS;
+    UNICODE_STRING devName, symLink;
+    PDRIVER_DISPATCH DispatchTable[IRP_MJ_MAXIMUM_FUNCTION+1] = {0};
+    NDIS_DEVICE_OBJECT_ATTRIBUTES devAttr;
 
     DEBUGP(DL_TRACE, "==>FilterRegisterDevice\n");
-
-    NdisZeroMemory(DispatchTable, (IRP_MJ_MAXIMUM_FUNCTION+1) * sizeof(PDRIVER_DISPATCH));
 
     DispatchTable[IRP_MJ_CREATE] = FilterDispatch;
     DispatchTable[IRP_MJ_CLEANUP] = FilterDispatch;
     DispatchTable[IRP_MJ_CLOSE] = FilterDispatch;
     DispatchTable[IRP_MJ_DEVICE_CONTROL] = FilterDeviceIoControl;
 
+    RtlInitUnicodeString(&devName, NTDEVICE_STRING);
+    RtlInitUnicodeString(&symLink, LINKNAME_STRING);
 
-    NdisInitUnicodeString(&DeviceName, NTDEVICE_STRING);
-    NdisInitUnicodeString(&DeviceLinkUnicodeString, LINKNAME_STRING);
-
-    //
-    // Create a device object and register our dispatch handlers
-    //
-    NdisZeroMemory(&DeviceAttribute, sizeof(NDIS_DEVICE_OBJECT_ATTRIBUTES));
-
-    DeviceAttribute.Header.Type = NDIS_OBJECT_TYPE_DEVICE_OBJECT_ATTRIBUTES;
-    DeviceAttribute.Header.Revision = NDIS_DEVICE_OBJECT_ATTRIBUTES_REVISION_1;
-    DeviceAttribute.Header.Size = sizeof(NDIS_DEVICE_OBJECT_ATTRIBUTES);
-
-    DeviceAttribute.DeviceName = &DeviceName;
-    DeviceAttribute.SymbolicName = &DeviceLinkUnicodeString;
-    DeviceAttribute.MajorFunctions = &DispatchTable[0];
-    DeviceAttribute.ExtensionSize = sizeof(FILTER_DEVICE_EXTENSION);
+    NdisZeroMemory(&devAttr, sizeof(devAttr));
+    devAttr.Header.Type = NDIS_OBJECT_TYPE_DEVICE_OBJECT_ATTRIBUTES;
+    devAttr.Header.Revision = NDIS_DEVICE_OBJECT_ATTRIBUTES_REVISION_1;
+    devAttr.Header.Size = sizeof(devAttr);
+    devAttr.DeviceName = &devName;
+    devAttr.SymbolicName = &symLink;
+    devAttr.MajorFunctions = &DispatchTable[0];
+    devAttr.ExtensionSize = 0; // no extension
 
     Status = NdisRegisterDeviceEx(
-                FilterDriverHandle,
-                &DeviceAttribute,
-                &NdisDeviceObject,
-                &NdisFilterDeviceHandle
-                );
-
-
-    if (Status == NDIS_STATUS_SUCCESS)
-    {
-        FilterDeviceExtension = NdisGetDeviceReservedExtension(NdisDeviceObject);
-
-        FilterDeviceExtension->Signature = 'FTDR';
-        FilterDeviceExtension->Handle = FilterDriverHandle;
-    }
-
+        FilterDriverHandle, &devAttr, &NdisDeviceObject, &NdisFilterDeviceHandle);
 
     DEBUGP(DL_TRACE, "<==FilterRegisterDevice: %x\n", Status);
-
-    return (Status);
-
+    return Status;
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-VOID
-FilterDeregisterDevice(
-    VOID
-    )
-
+VOID FilterDeregisterDevice(VOID)
 {
-    if (NdisFilterDeviceHandle != NULL)
-    {
+    if (NdisFilterDeviceHandle) {
         NdisDeregisterDeviceEx(NdisFilterDeviceHandle);
+        NdisFilterDeviceHandle = NULL;
+        NdisDeviceObject = NULL;
     }
-
-    NdisFilterDeviceHandle = NULL;
-
 }
 
 _Use_decl_annotations_
-NTSTATUS
-FilterDispatch(
-    PDEVICE_OBJECT       DeviceObject,
-    PIRP                 Irp
-    )
+NTSTATUS FilterDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-    PIO_STACK_LOCATION       IrpStack;
-    NTSTATUS                 Status = STATUS_SUCCESS;
-
     UNREFERENCED_PARAMETER(DeviceObject);
-
-    IrpStack = IoGetCurrentIrpStackLocation(Irp);
-
-    switch (IrpStack->MajorFunction)
-    {
-        case IRP_MJ_CREATE:
-            break;
-
-        case IRP_MJ_CLEANUP:
-            break;
-
-        case IRP_MJ_CLOSE:
-            break;
-
-        default:
-            break;
-    }
-
-    Irp->IoStatus.Status = Status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return Status;
-}
-
-_Use_decl_annotations_
-NTSTATUS
-FilterDeviceIoControl(
-    PDEVICE_OBJECT        DeviceObject,
-    PIRP                  Irp
-    )
-{
-    PIO_STACK_LOCATION          IrpSp;
-    NTSTATUS                    Status = STATUS_SUCCESS;
-    PFILTER_DEVICE_EXTENSION    FilterDeviceExtension;
-    PUCHAR                      InputBuffer;
-    PUCHAR                      OutputBuffer;
-    ULONG                       InputBufferLength, OutputBufferLength;
-    PLIST_ENTRY                 Link;
-    PUCHAR                      pInfo;
-    ULONG                       InfoLength = 0;
-    PMS_FILTER                  pFilter = NULL;
-    BOOLEAN                     bFalse = FALSE;
-
-
-    UNREFERENCED_PARAMETER(DeviceObject);
-
-
-    IrpSp = IoGetCurrentIrpStackLocation(Irp);
-
-    if (IrpSp->FileObject == NULL)
-    {
-        return(STATUS_UNSUCCESSFUL);
-    }
-
-
-    FilterDeviceExtension = (PFILTER_DEVICE_EXTENSION)NdisGetDeviceReservedExtension(DeviceObject);
-
-    ASSERT(FilterDeviceExtension->Signature == 'FTDR');
-
+    Irp->IoStatus.Status = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return STATUS_SUCCESS;
+}
 
-    switch (IrpSp->Parameters.DeviceIoControl.IoControlCode)
+static __forceinline ULONG minU(ULONG a, ULONG b){ return (a<b)?a:b; }
+
+_Use_decl_annotations_
+NTSTATUS FilterDeviceIoControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    NTSTATUS Status = STATUS_SUCCESS;
+    PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
+    ULONG inLen  = irpSp->Parameters.DeviceIoControl.InputBufferLength;
+    ULONG outLen = irpSp->Parameters.DeviceIoControl.OutputBufferLength;
+    PUCHAR buf   = (PUCHAR)Irp->AssociatedIrp.SystemBuffer;
+    ULONG info   = 0;
+
+    switch (irpSp->Parameters.DeviceIoControl.IoControlCode)
     {
-
-        case IOCTL_FILTER_RESTART_ALL:
+    case IOCTL_TL_SET_WHITELIST:
+        if (inLen < sizeof(TL_SET_WHITELIST)) {
+            Status = STATUS_BUFFER_TOO_SMALL;
             break;
+        }
+        Status = TlWhitelistReplace((const TL_SET_WHITELIST*)buf, inLen);
+        break;
 
-        case IOCTL_FILTER_RESTART_ONE_INSTANCE:
-            InputBuffer = OutputBuffer = (PUCHAR)Irp->AssociatedIrp.SystemBuffer;
-            InputBufferLength = IrpSp->Parameters.DeviceIoControl.InputBufferLength;
-
-            pFilter = filterFindFilterModule (InputBuffer, InputBufferLength);
-
-            if (pFilter == NULL)
-            {
-
-                break;
-            }
-
-            NdisFRestartFilter(pFilter->FilterHandle);
-
+    case IOCTL_TL_GET_DECISIONS:
+        if (outLen < sizeof(TL_GET_DECISIONS)) {
+            Status = STATUS_BUFFER_TOO_SMALL;
             break;
-
-        case IOCTL_FILTER_ENUMERATE_ALL_INSTANCES:
-
-            InputBuffer = OutputBuffer = (PUCHAR)Irp->AssociatedIrp.SystemBuffer;
-            InputBufferLength = IrpSp->Parameters.DeviceIoControl.InputBufferLength;
-            OutputBufferLength = IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
-
-
-            pInfo = OutputBuffer;
-
-            FILTER_ACQUIRE_LOCK(&FilterListLock, bFalse);
-
-            Link = FilterModuleList.Flink;
-
-            while (Link != &FilterModuleList)
-            {
-                pFilter = CONTAINING_RECORD(Link, MS_FILTER, FilterModuleLink);
-
-
-                InfoLength += (pFilter->FilterModuleName.Length + sizeof(USHORT));
-
-                if (InfoLength <= OutputBufferLength)
-                {
-                    *(PUSHORT)pInfo = pFilter->FilterModuleName.Length;
-                    NdisMoveMemory(pInfo + sizeof(USHORT),
-                                   (PUCHAR)(pFilter->FilterModuleName.Buffer),
-                                   pFilter->FilterModuleName.Length);
-
-                    pInfo += (pFilter->FilterModuleName.Length + sizeof(USHORT));
-                }
-
-                Link = Link->Flink;
+        } else {
+            TL_GET_DECISIONS* hdr = (TL_GET_DECISIONS*)buf;
+            ULONG space = (outLen - sizeof(TL_GET_DECISIONS)) / sizeof(TL_DECISION_V4);
+            ULONG max = minU(hdr->MaxItems, space);
+            ULONG n = 0;
+            if (max) {
+                TL_DECISION_V4* items = (TL_DECISION_V4*)(hdr + 1);
+                n = TlRingPopBatch(items, max);
             }
+            hdr->OutCount = n;
+            info = sizeof(TL_GET_DECISIONS) + n * sizeof(TL_DECISION_V4);
+            Status = STATUS_SUCCESS;
+        }
+        break;
 
-            FILTER_RELEASE_LOCK(&FilterListLock, bFalse);
-            if (InfoLength <= OutputBufferLength)
-            {
-
-                Status = NDIS_STATUS_SUCCESS;
-            }
-            //
-            // Buffer is small
-            //
-            else
-            {
-                Status = STATUS_BUFFER_TOO_SMALL;
-            }
-            break;
-
-
-        default:
-            break;
+    default:
+        Status = STATUS_INVALID_DEVICE_REQUEST;
+        break;
     }
 
     Irp->IoStatus.Status = Status;
-    Irp->IoStatus.Information = InfoLength;
-
+    Irp->IoStatus.Information = info;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
     return Status;
-
-
 }
-
-
-_IRQL_requires_max_(DISPATCH_LEVEL)
-PMS_FILTER
-filterFindFilterModule(
-    _In_reads_bytes_(BufferLength)
-         PUCHAR                   Buffer,
-    _In_ ULONG                    BufferLength
-    )
-{
-
-   PMS_FILTER              pFilter;
-   PLIST_ENTRY             Link;
-   BOOLEAN                  bFalse = FALSE;
-
-   FILTER_ACQUIRE_LOCK(&FilterListLock, bFalse);
-
-   Link = FilterModuleList.Flink;
-
-   while (Link != &FilterModuleList)
-   {
-       pFilter = CONTAINING_RECORD(Link, MS_FILTER, FilterModuleLink);
-
-       if (BufferLength >= pFilter->FilterModuleName.Length)
-       {
-           if (NdisEqualMemory(Buffer, pFilter->FilterModuleName.Buffer, pFilter->FilterModuleName.Length))
-           {
-               FILTER_RELEASE_LOCK(&FilterListLock, bFalse);
-               return pFilter;
-           }
-       }
-
-       Link = Link->Flink;
-   }
-
-   FILTER_RELEASE_LOCK(&FilterListLock, bFalse);
-   return NULL;
-}
-
-
-
-

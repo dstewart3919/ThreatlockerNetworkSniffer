@@ -1,0 +1,23 @@
+﻿  Building 'ndislwf' with toolset 'WindowsKernelModeDriver10.0' and the 'Universal' target platform.
+  Stamping x64\Debug\netlwf.inf
+  Stamping [Version] section with DriverVer=08/14/2025,8.56.58.199
+  filter.c
+  ndislwf.vcxproj -> C:\Users\happy\OneDrive\Desktop\ThreatlockerNetworkSniffer\x64\Debug\ndislwf.sys
+  Done Adding Additional Store
+  Successfully signed: C:\Users\happy\OneDrive\Desktop\ThreatlockerNetworkSniffer\x64\Debug\ndislwf.sys
+  
+  Driver is 'Universal'.
+  ........................
+  Signability test complete.
+  
+  Errors:
+  None
+  
+  Warnings:
+  None
+  
+  Catalog generation complete.
+  C:\Users\happy\OneDrive\Desktop\ThreatlockerNetworkSniffer\x64\Debug\ndislwf\netlwf.cat
+  Done Adding Additional Store
+  Successfully signed: x64\Debug\ndislwf\netlwf.cat
+  
